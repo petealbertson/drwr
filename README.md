@@ -126,6 +126,10 @@ cp -R node_modules/@alexapvl/drwr/skills/drwr-web .claude/skills/
 
 Or copy it from this repo into your user skills folder (for example `~/.claude/skills/drwr-web`).
 
+## Tests
+
+Run `pnpm test` with Node.js 22.18 or later. The spring tests use simulated frame timestamps.
+
 ## License
 
 MIT

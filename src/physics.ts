@@ -78,13 +78,17 @@ export function animateSpring(
       return;
     }
 
-    // Cap dt to avoid spiral of death on tab-switch resume
-    const dt = Math.min((time - lastTime) / 1000, 0.064);
+    // Limit catch-up after a pause and use smaller steps to keep the spring stable.
+    const elapsed = Math.min((time - lastTime) / 1000, 0.064);
     lastTime = time;
+    const steps = Math.max(1, Math.ceil(elapsed / (1 / 60)));
+    const dt = elapsed / steps;
 
-    const state = springStep(position, to, velocity, dt, cfg);
-    position = state.position;
-    velocity = state.velocity;
+    for (let i = 0; i < steps; i++) {
+      const state = springStep(position, to, velocity, dt, cfg);
+      position = state.position;
+      velocity = state.velocity;
+    }
 
     onUpdate(position);
 
