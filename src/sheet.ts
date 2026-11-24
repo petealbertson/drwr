@@ -15,6 +15,8 @@ export type SheetAlign = "center" | "left" | "right";
 export type DragMode = "handle" | "sheet" | "none";
 
 export interface SheetOptions {
+  /** Fit the natural sheet height up to the viewport limit. Use only snaps 0 and 1. Default: false. */
+  fitContent?: boolean;
   snapPoints?: number[];
   defaultSnap?: number;
   overlay?: boolean;
@@ -103,12 +105,13 @@ export class Sheet {
   private dragStartH = 0;
 
   private cancelAnimation: (() => void) | null = null;
+  private animationTargetH = 0;
   private cleanupGestures: (() => void) | null = null;
   private cleanupFocusTrap: (() => void) | null = null;
   private unlockScroll: (() => void) | null = null;
   private onPageShow: ((e: PageTransitionEvent) => void) | null = null;
   private onResize: (() => void) | null = null;
-  private naturalContentH = 0;
+  private naturalSheetH = 0;
   private destroyed = false;
 
   private static sanitizeSnapPoints(raw: number[]): number[] {
@@ -129,9 +132,9 @@ export class Sheet {
 
   constructor(container: HTMLElement, options: SheetOptions = {}) {
     this.container = container;
-    const snaps = Sheet.sanitizeSnapPoints(options.snapPoints ?? [0, 1]);
     this.options = {
-      snapPoints: snaps,
+      fitContent: options.fitContent ?? false,
+      snapPoints: options.fitContent ? [0, 1] : Sheet.sanitizeSnapPoints(options.snapPoints ?? [0, 1]),
       defaultSnap: options.defaultSnap ?? 0,
       overlay: options.overlay ?? true,
       dragHandle: options.dragHandle ?? true,
@@ -159,12 +162,14 @@ export class Sheet {
 
     this.buildDOM();
     this.container.removeAttribute("hidden");
-    this.naturalContentH = this.getContentHeight();
+    if (this.options.fitContent) this.measureFitHeight();
     this.bindGestures();
 
     const defaultSnap = this.options.defaultSnap;
-    if (defaultSnap > 0 && this.options.snapPoints.includes(defaultSnap)) {
-      this.currentH = this.snapToPixels(defaultSnap);
+    const hasDefault = defaultSnap > 0 && this.options.snapPoints.includes(defaultSnap);
+    const defaultH = hasDefault ? this.snapToPixels(defaultSnap) : 0;
+    if (hasDefault && (!this.options.fitContent || defaultH > 0.5)) {
+      this.currentH = defaultH;
       this.render(this.currentH);
       this.state = "open";
       this.currentSnap = defaultSnap;
@@ -190,29 +195,34 @@ export class Sheet {
 
     this.onResize = () => {
       this.applyLayout();
-      this.naturalContentH = this.getContentHeight();
-      if (this.state !== "closed" && this.currentSnap > 0) {
-        this.currentH = this.snapToPixels(this.currentSnap);
-        this.render(this.currentH);
-      }
+      this.refresh();
     };
     window.addEventListener("resize", this.onResize);
   }
 
   // --- Snap point conversion ---
 
-  private getContentHeight(): number {
-    return this.contentEl.scrollHeight + (this.handleEl?.offsetHeight ?? 0);
+  private measureFitHeight(): void {
+    const style = this.wrapperEl.style;
+    const height = style.height;
+    const scrollTop = this.contentEl.scrollTop;
+    // Measure the auto-sized border box at the current width, not the animated height.
+    style.height = "auto";
+    this.naturalSheetH = this.wrapperEl.getBoundingClientRect().height;
+    style.height = height;
+    this.contentEl.scrollTop = scrollTop;
+    this.wrapperEl.dataset.fitContent = this.naturalSheetH > this.maxSheetH() ? "scrollable" : "short";
   }
 
   private maxSheetH(): number {
     return window.innerHeight - this.options.topPadding;
   }
 
-  /** Convert a normalized snap point (0–1) to available viewport height. */
+  /** Convert a normalized snap point (0–1) to a sheet height. */
   private snapToPixels(snap: number): number {
     if (snap <= 0) return 0;
     const maxH = this.maxSheetH();
+    if (this.options.fitContent) return Math.max(0, Math.min(this.naturalSheetH, maxH));
     return Math.min(snap, 1) * maxH;
   }
 
@@ -269,6 +279,7 @@ export class Sheet {
   private buildDOM() {
     this.wrapperEl = document.createElement("div");
     this.wrapperEl.className = "drwr-sheet";
+    if (this.options.fitContent) this.wrapperEl.dataset.fitContent = "short";
     this.wrapperEl.setAttribute("tabindex", "-1");
 
     if (this.options.dragHandle) {
@@ -372,6 +383,7 @@ export class Sheet {
     const wasOpen = this.state === "open" || this.state === "dragging";
     this.cancelCurrentAnimation();
     this.state = "animating";
+    this.animationTargetH = targetH;
     const onDone = () => {
       this.currentH = targetH;
       this.render(targetH);
@@ -384,6 +396,9 @@ export class Sheet {
         this.onClosed();
       } else {
         this.state = "open";
+        if (this.options.fitContent && this.options.trapFocus && !this.cleanupFocusTrap) {
+          this.cleanupFocusTrap = createFocusTrap(this.wrapperEl);
+        }
         if (!wasOpen) this.options.onOpen();
         this.options.onSnap(snap);
       }
@@ -417,7 +432,7 @@ export class Sheet {
 
   private render(h: number) {
     const viewportH = window.innerHeight;
-    const visibleH = Math.max(0, h);
+    const visibleH = Math.max(0, this.options.fitContent ? Math.min(h, this.snapToPixels(1)) : h);
     const translateY = viewportH - visibleH;
 
     this.wrapperEl.style.visibility = visibleH > 0.5 ? "visible" : "hidden";
@@ -428,7 +443,7 @@ export class Sheet {
     if (this.overlayEl) {
       const snaps = this.snapPixels();
       const maxH = snaps[snaps.length - 1];
-      const opacity = Math.max(0, Math.min(1, visibleH / (maxH * 0.3)));
+      const opacity = maxH === 0 ? 0 : Math.max(0, Math.min(1, visibleH / (maxH * 0.3)));
       this.overlayEl.style.opacity = String(opacity);
       this.overlayEl.setAttribute("data-visible", visibleH > 1 ? "true" : "false");
     }
@@ -489,6 +504,16 @@ export class Sheet {
       target = sorted[sorted.length - 1];
     }
 
+    if (this.options.fitContent) {
+      this.measureFitHeight();
+      const targetH = this.snapToPixels(target);
+      if (targetH <= 0.5) return;
+      document.addEventListener("keydown", this.onKeyDown);
+      if (!this.unlockScroll) this.unlockScroll = lockScroll();
+      this.animateToH(targetH);
+      return;
+    }
+
     document.addEventListener("keydown", this.onKeyDown);
     this.animateToH(this.snapToPixels(target));
     if (!this.unlockScroll) this.unlockScroll = lockScroll();
@@ -511,6 +536,8 @@ export class Sheet {
     }
     if (point === 0) {
       this.close();
+    } else if (this.options.fitContent) {
+      this.open(point);
     } else {
       if (this.state === "closed") {
         document.addEventListener("keydown", this.onKeyDown);
@@ -563,7 +590,7 @@ export class Sheet {
   }
 
   setSnapPoints(points: number[]) {
-    if (this.destroyed) return;
+    if (this.destroyed || this.options.fitContent) return;
     this.options.snapPoints = Sheet.sanitizeSnapPoints(points);
 
     if (this.state !== "closed" && this.currentSnap > 0) {
@@ -577,8 +604,22 @@ export class Sheet {
   /** Re-measure content height and recompute current position. Call after dynamic content changes. */
   refresh() {
     if (this.destroyed) return;
-    this.naturalContentH = this.getContentHeight();
-    if (this.state !== "closed" && this.currentSnap > 0) {
+    if (this.options.fitContent) {
+      this.measureFitHeight();
+      const targetH = this.snapToPixels(1);
+      if (this.state === "open") {
+        if (targetH <= 0.5) this.onClosed();
+        else {
+          this.currentH = targetH;
+          this.render(targetH);
+        }
+      } else if (this.state === "animating" && this.animationTargetH > 0 && this.animationTargetH !== targetH) {
+        // Retarget an opening or spring-back, but leave a close in progress alone.
+        this.animateToH(targetH);
+      } else if (this.state !== "closed") {
+        this.render(this.currentH);
+      }
+    } else if (this.state !== "closed" && this.currentSnap > 0) {
       this.currentH = this.snapToPixels(this.currentSnap);
       this.render(this.currentH);
     }
@@ -586,7 +627,9 @@ export class Sheet {
 
   setOptions(opts: MutableSheetOptions) {
     if (this.destroyed) return;
-    if (opts.snapPoints !== undefined) this.options.snapPoints = Sheet.sanitizeSnapPoints(opts.snapPoints);
+    if (opts.snapPoints !== undefined && !this.options.fitContent) {
+      this.options.snapPoints = Sheet.sanitizeSnapPoints(opts.snapPoints);
+    }
     if (opts.damping !== undefined) this.options.damping = opts.damping;
     if (opts.stiffness !== undefined) this.options.stiffness = opts.stiffness;
     if (opts.mass !== undefined) this.options.mass = opts.mass;
@@ -610,7 +653,8 @@ export class Sheet {
         modal: this.options.modal,
       });
     }
-    if (opts.width !== undefined || opts.align !== undefined || opts.sidePadding !== undefined || opts.maxWidth !== undefined) {
+    const layoutChanged = opts.width !== undefined || opts.align !== undefined || opts.sidePadding !== undefined || opts.maxWidth !== undefined;
+    if (layoutChanged) {
       if (opts.width !== undefined) this.options.width = opts.width;
       if (opts.align !== undefined) this.options.align = opts.align;
       if (opts.sidePadding !== undefined) this.options.sidePadding = opts.sidePadding;
@@ -619,7 +663,9 @@ export class Sheet {
 
     // Recompute position when size-affecting options changed
     const sizeChanged = opts.topPadding !== undefined || opts.snapPoints !== undefined;
-    if (sizeChanged && this.state !== "closed" && this.currentSnap > 0) {
+    if (this.options.fitContent) {
+      if (layoutChanged || opts.topPadding !== undefined) this.refresh();
+    } else if (sizeChanged && this.state !== "closed" && this.currentSnap > 0) {
       if (opts.snapPoints !== undefined && !this.options.snapPoints.includes(this.currentSnap)) {
         const nearest = this.pixelsToSnap(this.currentH);
         this.animateToH(this.snapToPixels(nearest));
@@ -636,6 +682,7 @@ export class Sheet {
     if (opts.align !== undefined) this.options.align = opts.align;
     if (opts.sidePadding !== undefined) this.options.sidePadding = opts.sidePadding;
     this.applyLayout();
+    if (this.options.fitContent) this.refresh();
   }
 
   get isOpen(): boolean {
