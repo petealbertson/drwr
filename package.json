@@ -30,6 +30,7 @@
     "build": "tsup",
     "build:demo": "vite build demo --outDir dist",
     "dev": "vite demo",
+    "test": "node --test test/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
