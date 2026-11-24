@@ -51,6 +51,18 @@
 }
 
 
+.drwr-sheet[data-fit-content] {
+  box-sizing: border-box;
+  overflow: hidden;
+  touch-action: auto;
+}
+
+/* Keep drag gestures on short content and the handle. Let long content pan. */
+.drwr-sheet[data-fit-content="short"] .drwr-content,
+.drwr-sheet[data-fit-content] .drwr-handle {
+  touch-action: none;
+}
+
 .drwr-sheet[data-dragging="true"] {
   user-select: none;
   cursor: grabbing;

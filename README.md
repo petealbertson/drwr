@@ -41,10 +41,21 @@ sheet.refresh(); // re-measure after dynamic content change
 sheet.destroy();
 ```
 
+## Fit-content sheets
+
+Set `fitContent: true` to fit the sheet to its content, including the handle and sheet padding.
+The sheet leaves at least `topPadding` pixels above it. Longer content scrolls inside the sheet.
+For swipe-to-dismiss on a touch screen, drag the handle when the content scrolls.
+
+Fit-content mode uses only `0` (closed) and `1` (fully open). It ignores custom `snapPoints`.
+Use `defaultSnap: 1` to start open. Call `refresh()` after you change the content of an open sheet.
+The sheet also measures its height when it opens and when the viewport resizes.
+
 ## Options
 
 | Option                | Type                            | Default                         | Description                                                                              |
 | --------------------- | ------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `fitContent`          | `boolean`                       | `false`                         | Fit the sheet to its content. Use only closed and fully open snaps.                      |
 | `snapPoints`          | `number[]`                      | `[0, 1]`                        | Normalized snap points from 0 to 1 (0 = closed, 1 = max height). Sanitized on input.     |
 | `defaultSnap`         | `number`                        | `0`                             | Initial snap point. Non-zero values open with full state (scroll lock, focus trap, etc). |
 | `overlay`             | `boolean`                       | `true`                          | Show backdrop overlay                                                                    |
